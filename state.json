@@ -1,5 +1,12 @@
 {
-  "last_signature": "AVAILABLE",
   "last_checked": "2026-07-27T14:19:23.387639+00:00",
-  "lowest_price": "€ 3"
+  "properties": {
+    "waldrand": {
+      "last_signature": "AVAILABLE",
+      "lowest_price": "₪6,771"
+    },
+    "schwab": {
+      "last_signature": null
+    }
+  }
 }

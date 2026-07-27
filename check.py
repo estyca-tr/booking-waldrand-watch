@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check Waldrand Apartments availability on Booking.com and notify via ntfy."""
+"""Check Booking.com apartment availability and notify via ntfy."""
 
 from __future__ import annotations
 
@@ -11,18 +11,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Page, sync_playwright
 
-BOOKING_URL = os.environ.get(
-    "BOOKING_URL",
-    "https://www.booking.com/hotel/at/apartment-waldrand.html"
-    "?checkin=2026-08-03&checkout=2026-08-11"
-    "&group_adults=2&group_children=4&age=10&age=6&age=7&age=8"
-    "&no_rooms=2&room1=A%2C6%2C7&room2=A%2C8%2C10",
-)
-NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "esty-waldrand-aug2026-watch")
+CONFIG_FILE = Path(os.environ.get("CONFIG_FILE", "config.json"))
 STATE_FILE = Path(os.environ.get("STATE_FILE", "state.json"))
-PROPERTY_NAME = "Waldrand Apartments"
 
 UNAVAILABLE_PATTERNS = [
     r"sold out",
@@ -35,10 +27,14 @@ PRICE_PATTERN = re.compile(r"[₪€$]\s?[\d,]+")
 SELECT_ROOMS_PATTERN = re.compile(r"select rooms", re.IGNORECASE)
 
 
+def load_config() -> dict:
+    return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+
+
 def load_state() -> dict:
     if STATE_FILE.exists():
         return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    return {"last_signature": None}
+    return {"properties": {}}
 
 
 def save_state(state: dict) -> None:
@@ -46,21 +42,10 @@ def save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def fetch_page_text() -> str:
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            ),
-            locale="en-US",
-        )
-        page.goto(BOOKING_URL, wait_until="domcontentloaded", timeout=90_000)
-        page.wait_for_timeout(8_000)
-        text = page.inner_text("body")
-        browser.close()
-    return text
+def fetch_page_text(page: Page, url: str) -> str:
+    page.goto(url, wait_until="domcontentloaded", timeout=90_000)
+    page.wait_for_timeout(8_000)
+    return page.inner_text("body")
 
 
 def check_availability(text: str) -> tuple[bool, str | None]:
@@ -78,7 +63,6 @@ def check_availability(text: str) -> tuple[bool, str | None]:
             if not digits:
                 continue
             value = int(digits)
-            # Ignore tiny false positives (fees, per-night fragments, etc.)
             if "₪" in price and value < 1000:
                 continue
             if ("€" in price or "$" in price) and value < 100:
@@ -87,68 +71,112 @@ def check_availability(text: str) -> tuple[bool, str | None]:
         lowest = min(numeric, key=lambda x: x[0])[1] if numeric else (prices[0] if prices else None)
         return True, lowest
 
-    if "i'll reserve" in lowered or "reserve your apartment" in lowered:
+    if "i'll reserve" in lowered or "reserve your apartment" in lowered or "reserve" in lowered:
         return True, prices[0] if prices else None
 
     return False, None
 
 
-def send_ntfy(title: str, message: str, priority: str = "default", tags: str = "house") -> None:
+def send_ntfy(topic: str, title: str, message: str, priority: str = "default", tags: str = "house") -> None:
     cmd = [
         "curl", "-s",
         "-d", message,
         "-H", f"Title: {title}",
         "-H", f"Priority: {priority}",
         "-H", f"Tags: {tags}",
-        f"https://ntfy.sh/{NTFY_TOPIC}",
+        f"https://ntfy.sh/{topic}",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"ntfy failed: {result.stderr or result.stdout}")
 
 
-def main() -> int:
-    state = load_state()
-    previous = state.get("last_signature")
+def process_property(
+    prop: dict,
+    prop_state: dict,
+    config: dict,
+    page: Page,
+) -> tuple[str, dict]:
+    prop_id = prop["id"]
+    name = prop["name"]
+    date_label = config.get("date_label", "")
+    guests_label = config.get("guests_label", "")
+    topic = config.get("ntfy_topic") or os.environ.get("NTFY_TOPIC", "")
+    previous = prop_state.get("last_signature")
 
     try:
-        text = fetch_page_text()
+        text = fetch_page_text(page, prop["booking_url"])
     except Exception as exc:
-        print(f"ERROR: could not load Booking page: {exc}", file=sys.stderr)
-        return 1
+        return f"{name}: ERROR — {exc}", prop_state
 
     available, lowest_price = check_availability(text)
-    current = "AVAILABLE" if available else "UNAVAILABLE"
 
     if available:
         price_note = f" מחיר מ-{lowest_price}." if lowest_price else ""
         send_ntfy(
-            "דירה עדיין זמינה",
-            f"{PROPERTY_NAME} עדיין זמינה ל-03.08–11.08 (2 מבוגרים + 4 ילדים).{price_note}",
+            topic,
+            f"עדיין זמינה: {name}",
+            f"{name} עדיין זמינה ל-{date_label} ({guests_label}).{price_note}",
             priority="default",
             tags="house,white_check_mark",
         )
-        state["last_signature"] = "AVAILABLE"
+        prop_state["last_signature"] = "AVAILABLE"
         if lowest_price:
-            state["lowest_price"] = lowest_price
-        save_state(state)
-        print(f"AVAILABLE{price_note} — heartbeat sent")
-        return 0
+            prop_state["lowest_price"] = lowest_price
+        return f"{name}: AVAILABLE{price_note} — heartbeat sent", prop_state
 
-    if previous == "AVAILABLE" or (previous is None and os.environ.get("NOTIFY_IF_ALREADY_UNAVAILABLE") == "true"):
+    if previous == "AVAILABLE" or (
+        previous is None and os.environ.get("NOTIFY_IF_ALREADY_UNAVAILABLE") == "true"
+    ):
         send_ntfy(
-            "דירה נתפסה ב-Booking!",
-            f"הדירה {PROPERTY_NAME} נתפסה! כבר לא זמינה ל-03.08–11.08 (2 מבוגרים + 4 ילדים).",
+            topic,
+            f"נתפסה: {name}!",
+            f"הדירה {name} נתפסה! כבר לא זמינה ל-{date_label} ({guests_label}).",
             priority="urgent",
             tags="warning,rotating_light",
         )
-        print("UNAVAILABLE — urgent alert sent")
+        result = f"{name}: UNAVAILABLE — urgent alert sent"
     else:
-        print("UNAVAILABLE — silent (already reported)")
+        result = f"{name}: UNAVAILABLE — silent (already reported)"
 
-    state["last_signature"] = "UNAVAILABLE"
+    prop_state["last_signature"] = "UNAVAILABLE"
+    return result, prop_state
+
+
+def main() -> int:
+    config = load_config()
+    state = load_state()
+    properties = config.get("properties", [])
+    if not properties:
+        print("ERROR: no properties in config", file=sys.stderr)
+        return 1
+
+    prop_states = state.setdefault("properties", {})
+    results: list[str] = []
+    exit_code = 0
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            locale="en-US",
+        )
+        for prop in properties:
+            prop_id = prop["id"]
+            prop_state = prop_states.setdefault(prop_id, {})
+            result, prop_states[prop_id] = process_property(prop, prop_state, config, page)
+            results.append(result)
+            if result.startswith(prop["name"] + ": ERROR"):
+                exit_code = 1
+        browser.close()
+
     save_state(state)
-    return 0
+    for line in results:
+        print(line)
+    return exit_code
 
 
 if __name__ == "__main__":
