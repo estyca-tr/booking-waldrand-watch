@@ -75,9 +75,16 @@ def check_availability(text: str) -> tuple[bool, str | None]:
         numeric = []
         for price in prices:
             digits = re.sub(r"[^\d]", "", price)
-            if digits:
-                numeric.append((int(digits), price))
-        lowest = min(numeric, key=lambda x: x[0])[1] if numeric else prices[0]
+            if not digits:
+                continue
+            value = int(digits)
+            # Ignore tiny false positives (fees, per-night fragments, etc.)
+            if "₪" in price and value < 1000:
+                continue
+            if ("€" in price or "$" in price) and value < 100:
+                continue
+            numeric.append((value, price))
+        lowest = min(numeric, key=lambda x: x[0])[1] if numeric else (prices[0] if prices else None)
         return True, lowest
 
     if "i'll reserve" in lowered or "reserve your apartment" in lowered:
