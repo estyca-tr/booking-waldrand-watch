@@ -109,8 +109,8 @@ def process_property(
     prop_id = prop["id"]
     name = prop["name"]
     booking_url = prop["booking_url"]
-    date_label = config.get("date_label", "")
-    guests_label = config.get("guests_label", "")
+    date_label = prop.get("date_label") or config.get("date_label", "")
+    guests_label = prop.get("guests_label") or config.get("guests_label", "")
     topic = config.get("ntfy_topic") or os.environ.get("NTFY_TOPIC", "")
     previous = prop_state.get("last_signature")
 
