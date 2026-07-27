@@ -12,6 +12,7 @@ Configured in `config.json`:
 
 1. Waldrand Apartments
 2. Appartement Schwab Ski-in Ski-out
+3. Zirbennest
 
 ## Setup
 
