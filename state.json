@@ -1,5 +1,5 @@
 {
-  "last_checked": "2026-07-27T15:07:18.335935+00:00",
+  "last_checked": "2026-07-27T15:12:56.038228+00:00",
   "properties": {
     "waldrand": {
       "last_signature": "AVAILABLE",
@@ -10,7 +10,8 @@
       "lowest_price": "€ 184"
     },
     "zirbennest": {
-      "last_signature": null
+      "last_signature": "AVAILABLE",
+      "lowest_price": "$166"
     }
   }
 }
