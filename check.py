@@ -77,15 +77,24 @@ def check_availability(text: str) -> tuple[bool, str | None]:
     return False, None
 
 
-def send_ntfy(topic: str, title: str, message: str, priority: str = "default", tags: str = "house") -> None:
+def send_ntfy(
+    topic: str,
+    title: str,
+    message: str,
+    priority: str = "default",
+    tags: str = "house",
+    click_url: str | None = None,
+) -> None:
     cmd = [
         "curl", "-s",
         "-d", message,
         "-H", f"Title: {title}",
         "-H", f"Priority: {priority}",
         "-H", f"Tags: {tags}",
-        f"https://ntfy.sh/{topic}",
     ]
+    if click_url:
+        cmd.extend(["-H", f"Click: {click_url}"])
+    cmd.append(f"https://ntfy.sh/{topic}")
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"ntfy failed: {result.stderr or result.stdout}")
@@ -99,6 +108,7 @@ def process_property(
 ) -> tuple[str, dict]:
     prop_id = prop["id"]
     name = prop["name"]
+    booking_url = prop["booking_url"]
     date_label = config.get("date_label", "")
     guests_label = config.get("guests_label", "")
     topic = config.get("ntfy_topic") or os.environ.get("NTFY_TOPIC", "")
@@ -116,9 +126,10 @@ def process_property(
         send_ntfy(
             topic,
             f"עדיין זמינה: {name}",
-            f"{name} עדיין זמינה ל-{date_label} ({guests_label}).{price_note}",
+            f"{name} עדיין זמינה ל-{date_label} ({guests_label}).{price_note}\n\nלהזמנה: {booking_url}",
             priority="default",
             tags="house,white_check_mark",
+            click_url=booking_url,
         )
         prop_state["last_signature"] = "AVAILABLE"
         if lowest_price:
@@ -131,9 +142,10 @@ def process_property(
         send_ntfy(
             topic,
             f"נתפסה: {name}!",
-            f"הדירה {name} נתפסה! כבר לא זמינה ל-{date_label} ({guests_label}).",
+            f"הדירה {name} נתפסה! כבר לא זמינה ל-{date_label} ({guests_label}).\n\nלינק (לבדיקה): {booking_url}",
             priority="urgent",
             tags="warning,rotating_light",
+            click_url=booking_url,
         )
         result = f"{name}: UNAVAILABLE — urgent alert sent"
     else:
