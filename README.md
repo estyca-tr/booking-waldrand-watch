@@ -1,24 +1,7 @@
 # Booking Apartments Watch
 
-Free monitor for Booking.com apartments.
+**Monitoring is currently stopped.**
 
-- Checks every **4 hours** via GitHub Actions (free)
-- Sends **ntfy** push notifications (free)
-- Heartbeat while available; urgent alert when taken
+Previously checked Booking.com apartments every 4 hours via GitHub Actions and sent ntfy notifications.
 
-## Monitored properties
-
-Configured in `config.json`:
-
-1. Waldrand Apartments
-2. Appartement Schwab Ski-in Ski-out
-3. Zirbennest
-
-## Setup
-
-1. Install [ntfy](https://ntfy.sh) and subscribe to: `esty-waldrand-aug2026-watch`
-2. GitHub Actions runs automatically on the public repo
-
-## Add another apartment
-
-Edit `config.json` — add an entry to `properties` with `id`, `name`, and `booking_url`.
+To re-enable, restore `.github/workflows/watch.yml` and enable the workflow in GitHub Actions.
